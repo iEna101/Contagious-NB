@@ -1,0 +1,44 @@
+dataFile_conv.columns = ['text','class_code']
+kf = KFold(n_splits = 5, random_state = None, shuffle = False) 
+kf.get_n_splits(dataFile_conv['text'])
+
+nb_metrics = []
+cnb_metrics = []
+for train_index, test_index in kf.split(dataFile_conv['text']):
+    X_train, X_test = dataFile_conv['text'][train_index], dataFile_conv['text'][test_index]
+    y_train, y_test = dataFile_conv['class_code'][train_index], dataFile_conv['class_code'][test_index]
+    train_matrix = (X_train,y_train)
+    train_matrix = pd.DataFrame(train_matrix).transpose()
+    train_matrix_id = train_matrix.index
+    test_matrix = (X_test,y_test)
+    test_matrix = pd.DataFrame(test_matrix).transpose()
+    # Preprocessing of the corpus
+    corpus_clean = train_matrix.apply(lambda x: preprocessing(x), axis = 1)
+    
+    # Obtain feature matrix for train data
+    feature_matrix = features(corpus_clean)
+    feature_matrix['id_labels'] = train_matrix_id
+    feature_matrix = feature_matrix.set_index(feature_matrix['id_labels'])
+    feature_matrix = feature_matrix.drop(columns = ['id_labels'])
+    
+    feature_matrix["class_code"] = train_matrix["class_code"] # Add class column to feature matrix to seperate classes
+    test_matrix.columns = ['text','class_code']
+    test_doc = pd.DataFrame(test_matrix)
+    test_doc_clean = test_doc.apply(lambda x: preprocessing(x), axis = 1)
+    print('features = done')
+    # Naive Bayes
+    x_nb = NB_classification(feature_matrix,test_doc_clean)
+    nb_metrics.append(x_nb)
+    print('NB = done')
+    # Contagious Naive Bayes
+    x_cnb = CNB_classification(feature_matrix,test_doc_clean,0.001,1)
+    cnb_metrics.append(x_cnb)
+    print('CNB = done')
+    
+metric_cols = ['Accuracy','Precision','Recall','F1']
+nb_m = pd.DataFrame(nb_metrics,columns = metric_cols)
+cnb_m = pd.DataFrame(cnb_metrics,columns = metric_cols)
+nb_mean = nb_m.mean()
+cnb_mean = cnb_m.mean()
+print(nb_mean)
+print(cnb_mean)
