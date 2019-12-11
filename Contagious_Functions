@@ -1,0 +1,293 @@
+def preprocessing(file):
+    '''
+    input:
+        file: Text documents
+    output:
+        lemmatized_out: List filled with preprocessed text
+    description:
+        Simple pre-processing to remove noise from corpus
+    '''
+    lemmatizer = WordNetLemmatizer()
+    for row in file:
+        sentence = str(row)
+        # Set all characters to lowercase
+        lower_case = sentence.lower()
+        # Remove non-alphabetic characters
+        no_alpha = re.sub(r'[^\w\s]','',lower_case)
+        # Remove underscore character
+        no_under = re.sub(r"_","",no_alpha)
+        # Remove ccahracters longer than 15
+        less_20 = re.sub("\w{15,}","",no_under)
+        # tokenize
+        token = word_tokenize(less_20)
+        # lemmatize
+        lemmatized_out = ' '.join([lemmatizer.lemmatize(w) for w in token])
+        
+        return lemmatized_out
+    
+def features(file):
+    '''
+    input:
+        file: Text documents
+    output:
+        feature_mat: Bag of words (BoW) feature matrix
+    description:
+        Obtain feature (document x word) matrix for a set of input documents
+    '''
+    matrix = CountVectorizer(stop_words='english')
+    feature_mat = matrix.fit_transform(file).toarray()
+    feature_mat = pd.DataFrame(feature_mat)
+    feature_names = matrix.get_feature_names()
+    feature_mat.columns = feature_names
+    
+    return feature_mat
+
+def class_interest(file, class_id):
+    '''
+    input:
+        file: Bag of words feature matrix
+        class_id: Integer that represents class of interest in class column
+                    0: Negative
+                    1: Positive
+    output:
+        class_f: Bag of words (BoW) for class of interest
+    description:
+        Extract class specific feature matrix
+    '''
+    class_f = file.loc[file['class_code'] == class_id]
+    class_f = class_f.reset_index()
+    class_f = class_f.drop(['class_code'], axis = 1)
+    
+    return class_f
+
+def class_probability(file,class_id):
+    '''
+    input:
+        file: Text documents
+        class_id: Integer that represents class of interest in class column
+                    0: Negative
+                    1: Positive
+    output:
+        class_prob: Probability of class of interest 
+    description:
+        Compute class prior
+    '''
+    class_file = class_interest(file,class_id)
+    class_count = len(class_file)
+    total_count = len(file)
+    class_prob = np.true_divide(class_count,total_count)
+    
+    return class_prob
+
+#------------------------------Baseline Naive Bayes------------------------------#  
+    
+def likelihood_nb(file,class_id):
+    '''
+    input:
+        file: Feature matrix of Text documents
+        class_id: Integer that represents class of interest in class column
+                    0: Negative
+                    1: Positive
+    output:
+        likelihood: MLE's based on training scenarios
+    description:
+        Computes the MLE's for the multinomial naive Bayes classifier
+    '''
+    # likelihood
+    class_file = class_interest(file,class_id)
+    class_file = class_file.drop(['id_labels'],axis=1)
+    feature_names = class_file.columns
+    vocab_len = len(feature_names)
+    sum_x_nij = []
+    for n in class_file[feature_names]:
+        sum_n = sum(class_file[n])
+        sum_x_nij.append(sum_n)
+        n_k = sum(sum_x_nij)
+        denominator = np.add(n_k,vocab_len)
+        numerator = np.add(sum_x_nij,1)
+        fraction = np.true_divide(numerator,denominator)
+        theta_hat = pd.DataFrame(fraction).transpose()
+    theta_hat.columns = feature_names
+
+    return theta_hat
+
+def posterior_nb(test_file,train_features,class_id):
+    '''
+    input:
+        test_file: Test case
+        train_features: Feature matrix of text document (BoW)
+        class_id: Integer that represents class of interest in class column
+                    0: Negative
+                    1: Positive
+    output:
+        posterior: Posterior probability of test case for class of interest
+    description:
+        Computes the posterior probabilities associated with the test scenarios
+    '''
+    c_hat = []
+    test_features = features(test_file) # features present in test case
+    train_nb = likelihood_nb(train_features,class_id) # mle for all features present in training case
+    for j in range(len(test_features)):
+        test_j_feature = test_features.loc[j] # doc_j in test set
+        test_j_feature = test_j_feature.iloc[test_j_feature.nonzero()[0]] # features present in test case
+        # class prior
+        class_p = class_probability(train_features,class_id)
+        class_p_log_space = np.log10(class_p)
+        # conditional
+        test_intersection = set(train_nb.columns).intersection(test_j_feature.index)
+        class_mle = train_nb[test_intersection]
+        conditional_log_space = np.log10(class_mle)
+        # Decision rule
+        c_hat_j = np.add(class_p_log_space,np.sum(conditional_log_space,axis=1))
+        c_hat.append(c_hat_j)
+
+    return(c_hat)
+    
+def NB_classification(feature_matrix,test_doc_clean):
+    '''
+    input:
+        feature_matrix: Feature matrix of text document (BoW)
+        test_doc_clean: Pre-processed test scenarios
+    output:
+        metric_frame: Standard classification metrics
+    description:
+        Computes standard evaluation metrics such as accuracy, precision, recall and f1
+    '''
+    class_code = np.unique(feature_matrix['class_code'])
+    f = []
+    for i in class_code:
+        c_hat_test = posterior_nb(test_doc_clean,feature_matrix,i)
+        for j in range(len(c_hat_test)):
+            c_frame = (c_hat_test[j].values)
+            frame = (i,j,c_frame[0])
+            frame = list(frame)
+            f.append(frame)
+    
+    c_hat_class = pd.DataFrame(f,columns = ['class_code','j','c_hat'])
+    c_hat_doc = c_hat_class.groupby(['j']).agg(lambda x: list(x))
+    c_hat_doc = c_hat_doc.reset_index()
+    decision_doc_nb = c_hat_doc['c_hat']
+    decision_doc_nb = pd.DataFrame(list(decision_doc_nb))
+    decision_doc_nb['true_id'] = test_doc_clean.index
+    
+    decision_doc_nb['flag'] = (decision_doc_nb[0] < decision_doc_nb[1]).astype(int) # will return 0 if [0] less than [1]
+    decision_doc_nb = decision_doc_nb.set_index(decision_doc_nb['true_id'])
+    decision_doc_nb['real'] = test_matrix['class_code'].astype(int)
+    
+    # Classification metrics
+    acc_nb = accuracy_score(decision_doc_nb['real'], decision_doc_nb['flag'])
+    precision_nb = precision_score(decision_doc_nb['real'], decision_doc_nb['flag'])
+    recall_nb = recall_score(decision_doc_nb['real'], decision_doc_nb['flag'])
+    f1_nb = f1_score(decision_doc_nb['real'], decision_doc_nb['flag'])
+    
+    metric_frame = (acc_nb,precision_nb,recall_nb,f1_nb)
+    return metric_frame    
+#------------------------------Contagious Naive Bayes------------------------------#   
+    
+def likelihood_cnb(file,class_id,c1,c2):
+    '''
+    input:
+        file: Feature matrix of Text documents
+        class_id: Integer that represents class of interest in class column
+                    0: Negative
+                    1: Positive
+        c1: Smoothing parameter - numerator
+        c2: Smoothing parameter - denominator
+    output:
+        likelihood: MLE's based on training scenarios
+    description:
+        Computes the MLE's for the contagious naive Bayes classifier
+    '''
+    class_file = class_interest(file,class_id)
+    class_file = class_file.drop(['id_labels'],axis=1)
+    feature_names = class_file.columns
+    D_c = len(class_file)
+    sum_x_ij = []
+    for n in class_file[feature_names]:
+        sum_n = sum(class_file[n])
+        sum_x_ij.append(sum_n)
+        n_k = list(sum_x_ij)
+        #print(sum_x_ij,n_k)
+        denominator = np.add(D_c,c2)
+        numerator = np.add(n_k,c1)
+        fraction = np.true_divide(numerator,denominator)
+        
+    theta_hat = pd.DataFrame(fraction).transpose()
+    theta_hat.columns = feature_names
+    
+    return(theta_hat)
+
+def posterior_cnb(test_file,train_features,class_id,c1,c2):
+    '''
+    input:
+        test_file: Test case
+        train_features: Feature matrix of text document (BoW)
+        class_id: Integer that represents class of interest in class column
+                    0: Negative
+                    1: Positive
+        c1: Smoothing parameter - numerator
+        c2: Smoothing parameter - denominator
+    output:
+        posterior: Posterior probability of test scenarios for class of interest
+    description:
+        Computes the posterior probabilities associated with the test scenarios
+    '''
+    c_hat = []
+    test_features = features(test_file) # features present in test case
+    train_cnb = likelihood_cnb(train_features,class_id,c1,c2)
+    for j in range(len(test_features)):
+        test_j_feature = test_features.loc[j] # doc_j in test set
+        test_j_feature = test_j_feature.iloc[test_j_feature.nonzero()[0]] # features present in test case
+        # class prior
+        class_p = class_probability(train_features,class_id)
+        class_p_log_space = np.log10(class_p)
+        # conditional
+        test_intersection = set(train_cnb.columns).intersection(test_j_feature.index)
+        class_mle = train_cnb[test_intersection]
+        conditional_log_space = (np.log10(class_mle) - class_mle)
+        # Decision rule
+        c_hat_j = np.add(class_p_log_space,np.sum(conditional_log_space,axis=1))
+        c_hat.append(c_hat_j)
+        
+    return(c_hat)
+def CNB_classification(feature_matrix,test_doc_clean,c1,c2):
+    '''
+    input:
+        feature_matrix: Feature matrix of text document (BoW)
+        test_doc_clean: Pre-processed test scenarios
+        c1: Smoothing parameter - numerator
+        c2: Smoothing parameter - denominator
+    output:
+        metric_frame: Standard ckassification metrics
+    description:
+        Computes standard evaluation metrics such as accuracy, precision, recall and f1
+    '''
+    class_code = np.unique(feature_matrix['class_code'])
+    f = []
+    for i in class_code:
+        c_hat_test = posterior_cnb(test_doc_clean,feature_matrix,i,c1,c2)
+        for j in range(len(c_hat_test)):
+            c_frame = (c_hat_test[j].values)
+            frame = (i,j,c_frame[0])
+            frame = list(frame)
+            f.append(frame)
+    
+    c_hat_class = pd.DataFrame(f,columns = ['class_code','j','c_hat'])
+    c_hat_doc = c_hat_class.groupby(['j']).agg(lambda x: list(x))
+    c_hat_doc = c_hat_doc.reset_index()
+    decision_doc_cnb = c_hat_doc['c_hat']
+    decision_doc_cnb = pd.DataFrame(list(decision_doc_cnb))
+    decision_doc_cnb['true_id'] = test_doc_clean.index
+    
+    decision_doc_cnb['flag'] = (decision_doc_cnb[0] < decision_doc_cnb[1]).astype(int) # will return 0 if [0] less than [1]
+    decision_doc_cnb = decision_doc_cnb.set_index(decision_doc_cnb['true_id'])
+    decision_doc_cnb['real'] = test_matrix['class_code'].astype(int)
+
+    # Classification metrics
+    acc_cnb = accuracy_score(decision_doc_cnb['real'], decision_doc_cnb['flag'])
+    precision_cnb = precision_score(decision_doc_cnb['real'], decision_doc_cnb['flag'])
+    recall_cnb = recall_score(decision_doc_cnb['real'], decision_doc_cnb['flag'])
+    f1_cnb = f1_score(decision_doc_cnb['real'], decision_doc_cnb['flag'])
+
+    metric_frame = (acc_cnb,precision_cnb,recall_cnb,f1_cnb)
+    return metric_frame
