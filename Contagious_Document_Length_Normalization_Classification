@@ -1,0 +1,68 @@
+dataFile_conv.columns = ['text','class_code']
+kf = KFold(n_splits=5, random_state=None, shuffle=False) 
+kf.get_n_splits(dataFile_conv['text'])
+
+cnb_dln_metrics = []
+for train_index, test_index in kf.split(dataFile_conv['text']):
+    #print("TRAIN:", train_index, "TEST:", test_index)
+    X_train, X_test = dataFile_conv['text'][train_index], dataFile_conv['text'][test_index]
+    y_train, y_test = dataFile_conv['class_code'][train_index], dataFile_conv['class_code'][test_index]
+    
+    train_matrix = (X_train,y_train)
+    train_matrix = pd.DataFrame(train_matrix).transpose()
+    train_matrix_id = train_matrix.index
+    test_matrix = (X_test,y_test)
+    test_matrix = pd.DataFrame(test_matrix).transpose()
+
+    # concatenate docs of same class together (from training set)
+    corpus_clean = train_matrix.apply(lambda x: preprocessing(x), axis = 1)
+    
+    doc_new = pd.DataFrame(corpus_clean,columns = ['text'])
+    doc_new['class_code'] = train_matrix['class_code'].astype(int)
+    doc_new_id = doc_new.index
+    
+    doc_nc = doc_new.groupby(['class_code']).agg(lambda x: list(x))
+    doc_nc = doc_nc.reset_index()
+    cols = ['text','class_code']
+    doc_nc = doc_nc[cols]
+    doc_new_c = pd.DataFrame(doc_nc.apply(lambda x: preprocessing(x),axis=1),columns = ['text'])
+    doc_new_c['class_code'] = doc_nc['class_code']
+    
+    class_codes = np.unique(doc_new_c['class_code'])
+    df = pd.DataFrame(columns = ['class_code','text'])
+    for i in class_codes:
+        ci = class_interest(doc_new_c,i)
+        for n in ci['text']:
+            doc_len = len(n.split())
+            pseudo_len = 124
+            pseudo = round(doc_len / pseudo_len)
+            pseudo_doc = [n.split()[k:k + pseudo_len] for k in range(0,doc_len,pseudo_len)]
+            pseudo_doc = [' '.join(pseudo_doc[k]) for k in range(0,len(pseudo_doc))]
+            print(len(pseudo_doc))
+            pseudo_doc_class = ([i]*len(pseudo_doc))
+            for j in range(0,len(pseudo_doc)):
+                pseudo_jj = (pseudo_doc_class[j], pseudo_doc[j])
+                pseudo_jj = list(pseudo_jj)
+                pseudo_df = pd.Series(pseudo_jj, index = ["class_code","text"])
+                df = df.append(pseudo_df, ignore_index = True)
+    print('phase 1: Complete')            
+    # Feature matrix for DLN data
+    feature_matrix_DLN = features(df['text'])
+    
+    feature_matrix_DLN["class_code"] = df["class_code"] # Add class column to feature matrix to seperate classes
+    feature_matrix_ids = feature_matrix_DLN.index
+    feature_matrix_DLN['id_labels'] = feature_matrix_ids
+    test_doc = pd.DataFrame(test_matrix)
+    test_doc_clean = test_doc.apply(lambda x: preprocessing(x), axis = 1)
+    
+    # Contagious Naive Bayes
+    x_dln_cnb = CNB_classification(feature_matrix_DLN,test_doc_clean,0.001,1)
+    cnb_dln_metrics.append(x_dln_cnb)
+
+    print('phase 2: Complete')
+    print('######################################################################')
+    
+metric_cols = ['Accuracy','Precision','Recall','F1']
+cnb_dln_m = pd.DataFrame(cnb_dln_metrics,columns = metric_cols)
+cnb_dln_mean = cnb_dln_m.mean()
+print(cnb_dln_mean)
