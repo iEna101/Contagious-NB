@@ -1,0 +1,132 @@
+dataFile_conv.columns = ['text','class_code']
+X_train, X_test, y_train, y_test = train_test_split(dataFile_conv['text'], dataFile_conv['class_code'], test_size=0.2, random_state=42)
+
+train_matrix = (X_train,y_train)
+train_matrix = pd.DataFrame(train_matrix).transpose()
+train_matrix_id = train_matrix.index
+test_matrix = (X_test,y_test)
+test_matrix = pd.DataFrame(test_matrix).transpose()
+# Preprocessing of the corpus
+corpus_clean = train_matrix.apply(lambda x: preprocessing(x), axis = 1)
+    
+# Obtain feature matrix for train data
+feature_matrix = features(corpus_clean)
+feature_matrix['id_labels'] = train_matrix_id
+feature_matrix = feature_matrix.set_index(feature_matrix['id_labels'])
+feature_matrix = feature_matrix.drop(columns = ['id_labels'])
+    
+feature_matrix["class_code"] = train_matrix["class_code"] # Add class column to feature matrix to seperate classes
+
+# baseline naive Bayes
+# Get likelihoods for unsupervised learning - NB
+class_ids = 0
+nb_likelihood = likelihood_nb(feature_matrix,class_ids)
+nb_likelihood_cols = list(nb_likelihood.columns)
+nb_likelihood_tp = nb_likelihood.transpose()
+nb_likelihood_tp.columns = ['likelihood']
+nb_likelihood_tp['word'] = nb_likelihood_cols
+
+nb_top_100_likelihood = nb_likelihood_tp.nlargest(100,['likelihood'])
+nb_top_100_likelihood = nb_top_100_likelihood.T
+nb_top_100_likelihood = nb_top_100_likelihood.drop(['word'])
+# Extract BoW for these top_100 observations
+nb_cols = nb_top_100_likelihood.columns
+nb_BoW = class_interest(feature_matrix,class_ids)
+nb_BoW = nb_BoW[nb_cols]
+nb_BoW.to_csv('PAN_top_100_nb.csv',index=False)
+
+# contagious naive Bayes
+# Get likelihoods for unsupervised learning - CNB
+class_ids = 0
+cnb_likelihood = likelihood_cnb(feature_matrix,class_ids,0.001,1)
+cnb_likelihood_cols = list(cnb_likelihood.columns)
+cnb_likelihood_tp = cnb_likelihood.transpose()
+cnb_likelihood_tp.columns = ['likelihood']
+cnb_likelihood_tp['word'] = cnb_likelihood_cols
+
+cnb_top_100_likelihood = cnb_likelihood_tp.nlargest(100,['likelihood'])
+cnb_top_100_likelihood = cnb_top_100_likelihood.T
+cnb_top_100_likelihood = cnb_top_100_likelihood.drop(['word'])
+# Extract BoW for these top_100 observations
+cnb_cols = cnb_top_100_likelihood.columns
+cnb_BoW = class_interest(feature_matrix,class_ids)
+cnb_BoW = cnb_BoW[cnb_cols]
+cnb_BoW.to_csv('PAN_top_100_cnb.csv',index=False)
+
+# Document length normalization
+dataFile_conv.columns = ['text','class_code']
+X_train, X_test, y_train, y_test = train_test_split(dataFile_conv['text'], dataFile_conv['class_code'], test_size=0.2, random_state=42)
+
+train_matrix = (X_train,y_train)
+train_matrix = pd.DataFrame(train_matrix).transpose()
+train_matrix_id = train_matrix.index
+test_matrix = (X_test,y_test)
+test_matrix = pd.DataFrame(test_matrix).transpose()
+# Preprocessing of the corpus
+corpus_clean = train_matrix.apply(lambda x: preprocessing(x), axis = 1)
+    
+doc_new = pd.DataFrame(corpus_clean,columns = ['text'])
+doc_new['class_code'] = train_matrix['class_code'].astype(int)
+doc_new_id = doc_new.index
+    
+doc_nc = doc_new.groupby(['class_code']).agg(lambda x: list(x))
+doc_nc = doc_nc.reset_index()
+cols = ['text','class_code']
+doc_nc = doc_nc[cols]
+doc_new_c = pd.DataFrame(doc_nc.apply(lambda x: preprocessing(x),axis=1),columns = ['text'])
+doc_new_c['class_code'] = doc_nc['class_code']
+    
+class_codes = np.unique(doc_new_c['class_code'])
+df = pd.DataFrame(columns = ['class_code','text'])
+for i in class_codes:
+  ci = class_interest(doc_new_c,i)
+  for n in ci['text']:
+    doc_len = len(n.split())
+    pseudo_len = 124
+    pseudo = round(doc_len / pseudo_len)
+    pseudo_doc = [n.split()[k:k + pseudo_len] for k in range(0,doc_len,pseudo_len)]
+    pseudo_doc = [' '.join(pseudo_doc[k]) for k in range(0,len(pseudo_doc))]
+    print(len(pseudo_doc))
+    pseudo_doc_class = ([i]*len(pseudo_doc))
+    for j in range(0,len(pseudo_doc)):
+      pseudo_jj = (pseudo_doc_class[j], pseudo_doc[j])
+      pseudo_jj = list(pseudo_jj)
+      pseudo_df = pd.Series(pseudo_jj, index = ["class_code","text"])
+      df = df.append(pseudo_df, ignore_index = True)           
+# Feature matrix for DLN data
+feature_matrix_DLN = features(df['text'])
+feature_matrix_DLN["class_code"] = df["class_code"] # Add class column to feature matrix to seperate classes
+feature_matrix_ids = feature_matrix_DLN.index
+feature_matrix_DLN['id_labels'] = feature_matrix_ids
+
+# Get likelihoods for unsupervised learning - CNB
+class_ids = 0
+class_file = class_interest(feature_matrix_DLN,class_ids)
+class_file = class_file.drop(['id_labels','index','level_0'],axis=1)
+feature_names = class_file.columns
+vocab_len = len(feature_names)
+sum_x_nij = []
+for n in class_file[feature_names]:
+  sum_n = sum(class_file[n])
+  sum_x_nij.append(sum_n)
+  n_k = sum(sum_x_nij)
+  denominator = np.add(n_k,vocab_len)
+  numerator = np.add(sum_x_nij,1)
+  fraction = np.true_divide(numerator,denominator)
+  theta_hat = pd.DataFrame(fraction).transpose()
+theta_hat.columns = feature_names
+#cnb_likelihood_dln = likelihood_cnb(feature_matrix_DLN,0,0.001,1)
+cnb_likelihood_dln = theta_hat
+cnb_likelihood_dln_cols = list(cnb_likelihood_dln.columns)
+cnb_likelihood_dln_tp = cnb_likelihood_dln.transpose()
+cnb_likelihood_dln_tp.columns = ['likelihood']
+cnb_likelihood_dln_tp['word'] = cnb_likelihood_dln_cols
+
+cnb_top_100_likelihood_dln = cnb_likelihood_dln_tp.nlargest(100,['likelihood'])
+cnb_top_100_likelihood_dln = cnb_top_100_likelihood_dln.T
+cnb_top_100_likelihood_dln = cnb_top_100_likelihood_dln.drop(['word'])
+# Extract BoW for these top_100 observations
+cnb_cols_0 = cnb_top_100_likelihood_dln.columns
+cnb_BoW = class_interest(feature_matrix_DLN,class_ids)
+cnb_BoW = cnb_BoW[cnb_cols_0]
+cnb_BoW.to_csv('PAN_top_100_dln_cnb0.csv',index=False)
