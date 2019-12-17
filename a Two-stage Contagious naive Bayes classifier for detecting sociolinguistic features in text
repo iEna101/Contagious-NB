@@ -183,7 +183,7 @@ def NB_classification(feature_matrix,test_doc_clean):
     decision_doc_nb = pd.DataFrame(list(decision_doc_nb))
     decision_doc_nb['true_id'] = test_doc_clean.index
     
-    decision_doc_nb['flag'] = (decision_doc_nb[0] < decision_doc_nb[1]).astype(int) # will return 0 if [0] less than [1]
+    decision_doc_nb['flag'] = (decision_doc_nb[0] < decision_doc_nb[1]).astype(int)
     decision_doc_nb = decision_doc_nb.set_index(decision_doc_nb['true_id'])
     decision_doc_nb['real'] = test_matrix['class_code'].astype(int)
     
@@ -293,7 +293,7 @@ def CNB_classification(feature_matrix,test_doc_clean,c1,c2):
     decision_doc_cnb = pd.DataFrame(list(decision_doc_cnb))
     decision_doc_cnb['true_id'] = test_doc_clean.index
     
-    decision_doc_cnb['flag'] = (decision_doc_cnb[0] < decision_doc_cnb[1]).astype(int) # will return 0 if [0] less than [1]
+    decision_doc_cnb['flag'] = (decision_doc_cnb[0] < decision_doc_cnb[1]).astype(int)
     decision_doc_cnb = decision_doc_cnb.set_index(decision_doc_cnb['true_id'])
     decision_doc_cnb['real'] = test_matrix['class_code'].astype(int)
 
